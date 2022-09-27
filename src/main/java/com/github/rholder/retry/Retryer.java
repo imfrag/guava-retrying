@@ -153,8 +153,12 @@ public final class Retryer<V> {
      *                            this exception is thrown and the thread's interrupt status is set.
      */
     public V call(Callable<V> callable) throws ExecutionException, RetryException {
+        // 获取重试开始时间
         long startTime = System.nanoTime();
+
+        // 重试循环
         for (int attemptNumber = 1; ; attemptNumber++) {
+            // 1. 执行任务
             Attempt<V> attempt;
             try {
                 V result = attemptTimeLimiter.call(callable);
@@ -163,18 +167,25 @@ public final class Retryer<V> {
                 attempt = new ExceptionAttempt<V>(t, attemptNumber, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime));
             }
 
+            // beta（自定义监听器，获取重试间任务执行信息，重试次数、失败结果和异常等）
             for (RetryListener listener : listeners) {
                 listener.onRetry(attempt);
             }
 
+            // 2. 使用Predicate根据Attempt判断是否需要重试
             if (!rejectionPredicate.apply(attempt)) {
                 return attempt.get();
             }
+
+            // 3. 在需要进行重试的基础上，判断是否需要停止重试
             if (stopStrategy.shouldStop(attempt)) {
+                // 超出重试限制
                 throw new RetryException(attemptNumber, attempt);
             } else {
+                // 计算下次重试需要等待时间
                 long sleepTime = waitStrategy.computeSleepTime(attempt);
                 try {
+                    // 阻塞等待
                     blockStrategy.block(sleepTime);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
